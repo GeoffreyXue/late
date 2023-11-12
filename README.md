@@ -7,6 +7,8 @@ _Running late to your next meeting? Let participants know._
 
 For Madhacks 2023, by Geoffrey Xue
 
+https://devpost.com/software/late?ref_content=my-projects-tab&ref_feature=my_projects
+
 ## Description
 
 Meetings! Going up the industry ladder, you calendar is increasingly packed with different kinds of meetings. As you get deep into discussion, some meetings often run over time, leading to a cascading effect of being late. Typing up a response or a longer email may not be feasible if you're engaged in the discussion. At the end of the day, people sit in meeting rooms or on empty Zoom calls contemplating whether you're coming, leading to friction.

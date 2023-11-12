@@ -113,6 +113,7 @@ fun Content(sender: String?, calendarId: String?, accessToken: String?, refresh:
     var nextEvent: Event? by remember { mutableStateOf(null) }
     var text by remember { mutableStateOf("")}
     var backgroundColor by remember { mutableStateOf(Green80)}
+    var sending by remember { mutableStateOf(false) }
 
     suspend fun fetchNextEvent() {
         if (accessToken == null) return
@@ -182,6 +183,7 @@ fun Content(sender: String?, calendarId: String?, accessToken: String?, refresh:
             Box (
                 modifier = GlanceModifier.clickable {
                     text = "Sending Email..."
+                    sending = true
                     coroutineScope.launch {
                         if (sender == null || accessToken == null || nextEvent == null || nextEvent?.attendees == null) return@launch
                         val subject = "Running Late to meeting - ${nextEvent!!.summary}"
@@ -201,7 +203,7 @@ fun Content(sender: String?, calendarId: String?, accessToken: String?, refresh:
                             backgroundColor = Red80
                         }
                         delay(2.seconds)
-                        text = ""
+                        sending = false
                         fetchNextEvent()
                     }
                 }
@@ -219,7 +221,7 @@ fun Content(sender: String?, calendarId: String?, accessToken: String?, refresh:
                                 .padding(16.dp)
                         )
 
-                        if (text != RECONFIGURE) {
+                        if (text != RECONFIGURE && !sending) {
                             Text(
                                 text = "Send email!",
                                 style = TextStyle(color = ColorProvider(MaterialTheme.colorScheme.onPrimary),

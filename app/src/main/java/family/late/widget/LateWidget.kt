@@ -12,10 +12,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
+import androidx.glance.Button
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
@@ -30,6 +32,7 @@ import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
+import androidx.glance.layout.Column
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
@@ -41,15 +44,20 @@ import androidx.glance.unit.ColorProvider
 import com.google.api.services.calendar.model.Event
 import family.late.apis.GoogleCalendarService
 import family.late.apis.GoogleGmailService.sendEmail
+import family.late.ui.theme.Green80
 import family.late.ui.theme.LateWidgetGlanceColorScheme
 import family.late.ui.theme.Red80
+import family.late.ui.theme.Yellow80
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.Instant
 import kotlin.time.Duration.Companion.seconds
 
-class LateWidget : GlanceAppWidget() {
 
+const val RECONFIGURE = "Calendar or token expired. Please reconfigure."
+
+class LateWidget : GlanceAppWidget() {
     companion object {
         private val SMALL_SQUARE = DpSize(100.dp, 100.dp)
         private val HORIZONTAL_RECTANGLE = DpSize(250.dp, 100.dp)
@@ -66,62 +74,89 @@ class LateWidget : GlanceAppWidget() {
     )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-
-        val sharedPreferences: SharedPreferences = context.getSharedPreferences("late", Context.MODE_PRIVATE)
-        val calendarId = sharedPreferences.getString("calendarId", null)
-        val accessToken = sharedPreferences.getString("token", null)
-        val email = sharedPreferences.getString("email", null)
-
         provideContent {
             GlanceTheme(colors = LateWidgetGlanceColorScheme.colors) {
-                Content(email, calendarId, accessToken)
+                ContentWrapper(context)
             }
         }
     }
 }
 
 @Composable
-fun Content(sender: String?, calendarId: String?, accessToken: String?) {
+fun ContentWrapper(context: Context) {
+    val sharedPreferences: SharedPreferences = context.getSharedPreferences("late", Context.MODE_PRIVATE)
+    var calendarId: String? by remember { mutableStateOf(sharedPreferences.getString("calendarId", null)) }
+    var accessToken: String? by remember { mutableStateOf(sharedPreferences.getString("token", null)) }
+    var email: String? by remember { mutableStateOf(sharedPreferences.getString("email", null)) }
+
+    fun refresh() {
+        calendarId = sharedPreferences.getString("calendarId", null)
+        accessToken = sharedPreferences.getString("token", null)
+        email = sharedPreferences.getString("email", null)
+    }
+
+    LaunchedEffect(Unit) {
+        refresh()
+    }
+
+    Content(email, calendarId, accessToken) { refresh() }
+}
+
+@Composable
+fun Content(sender: String?, calendarId: String?, accessToken: String?, refresh: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
 
     var nextEvent: Event? by remember { mutableStateOf(null) }
     var text by remember { mutableStateOf("")}
+    var backgroundColor by remember { mutableStateOf(Green80)}
 
-    LaunchedEffect(Unit) {
-        if (accessToken == null) return@LaunchedEffect
-        if (calendarId == null) return@LaunchedEffect
+    suspend fun fetchNextEvent() {
+        if (accessToken == null) return
+        if (calendarId == null) return
 
         nextEvent = null
 
         val events = GoogleCalendarService.getEvents(accessToken, calendarId)
 
-        if (events.isEmpty()) return@LaunchedEffect
+        if (events.isEmpty()) return
 
         val currentTime = Instant.now()
-
-        val test = events
-            .filter { Instant.ofEpochMilli(it.start.dateTime.value).isAfter(currentTime) }
-            .minByOrNull { it.start.dateTime.value }
-
-        Log.d("TEST", test.toString())
 
         nextEvent = events
             .filter { Instant.ofEpochMilli(it.start.dateTime.value).isAfter(currentTime) }
             .minByOrNull { it.start.dateTime.value }
     }
 
+    LaunchedEffect(Unit) {
+        fetchNextEvent()
+    }
+
     LaunchedEffect(sender, calendarId, accessToken, nextEvent) {
         if (sender == null || calendarId == null || accessToken == null) {
-            text = "Calendar or token expired. Please reconfigure."
-
+            text = RECONFIGURE
+            backgroundColor = Yellow80
         }
-        else if (nextEvent != null)
-            text = "Meeting soon! Late ping?"
+
+        val event = nextEvent
+
+        event?.let {
+            text = "Next meeting: ${event.summary}"
+            backgroundColor = Yellow80
+
+            val duration = Duration.between(Instant.now(), Instant.ofEpochMilli(event.start.dateTime.value))
+            val thirtyMinutes = Duration.ofMinutes(30)
+
+            if (duration <= thirtyMinutes) {
+                text = "Meeting: ${event.summary} in ${duration.toMinutes()} minute(s)!"
+                backgroundColor = Red80
+            }
+        }
     }
 
     Box(
-        modifier = GlanceModifier.background(ColorProvider(Red80))
+        modifier = GlanceModifier.background(ColorProvider(backgroundColor))
             .clickable {
+                text = "pinging..."
                 coroutineScope.launch {
                     if (sender == null || accessToken == null || nextEvent == null || nextEvent?.attendees == null) return@launch
                     val subject = "Late to meeting - ${nextEvent!!.summary}"
@@ -129,29 +164,57 @@ fun Content(sender: String?, calendarId: String?, accessToken: String?) {
                     // List of recipients includes all but sender
                     val recipients = nextEvent!!.attendees.map { it.email }.filter { !it.equals(sender)}
 
-                    text = if (sendEmail(accessToken, sender, subject, message, recipients))
-                        "Successfully sent email!"
-                    else
-                        "Failed to send email."
-                    delay(1.seconds)
-                    text = "Late!"
-
+                    if (sendEmail(accessToken, sender, subject, message, recipients)) {
+                        text = "Successfully sent email!"
+                        backgroundColor = Green80
+                    }
+                    else {
+                        text = "Failed to send email."
+                        backgroundColor = Red80
+                    }
+                    delay(2.seconds)
+                    text = ""
+                    fetchNextEvent()
                 }
             }
-            .fillMaxSize()
-            .cornerRadius(5.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            style = TextStyle(color = ColorProvider(MaterialTheme.colorScheme.onPrimary),
-                fontSize = TextUnit(32F, TextUnitType.Sp),
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center),
-            modifier = GlanceModifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        )
+
+        Column {
+//            Button(
+//                text = "Refresh",
+//                onClick = { refresh() },
+//                style = TextStyle(color = ColorProvider(Color.Black)),
+//                modifier = GlanceModifier.background(ColorProvider(Color.White))
+//            )
+
+            if (text.isNotEmpty()) {
+                Text(
+                    text = text,
+                    style = TextStyle(color = ColorProvider(MaterialTheme.colorScheme.onPrimary),
+                        fontSize = TextUnit(32F, TextUnitType.Sp),
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center),
+                    modifier = GlanceModifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                )
+
+                if (text != RECONFIGURE) {
+                    Text(
+                        text = "Send email!",
+                        style = TextStyle(color = ColorProvider(MaterialTheme.colorScheme.onPrimary),
+                            fontSize = TextUnit(16F, TextUnitType.Sp),
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center),
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .padding(8.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

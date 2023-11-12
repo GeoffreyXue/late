@@ -279,9 +279,8 @@ fun ContainerScreen() {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Container()
-
                         ProfileCard(name ?: "Unknown", email ?: "Unknown", profileUri)
+                        Container()
                     }
                 }
             }
@@ -378,13 +377,29 @@ fun CalendarView(modifier: Modifier = Modifier) {
     val activity = LocalContext.current as Activity
     
     var calendarListEntries: List<CalendarListEntry> by remember { mutableStateOf(listOf()) }
-    var selectedCalendar by remember { mutableStateOf(CalendarListEntry().setSummary("None")) }
+    var selectedCalendar by remember { mutableStateOf(CalendarListEntry().setSummary("")) }
 
     var nextEvent: Event? by remember { mutableStateOf(null)}
+
 
     LaunchedEffect(accessToken) {
         if (accessToken == null) return@LaunchedEffect
         calendarListEntries = GoogleCalendarService.listCalendars(accessToken)
+
+
+        val sharedPreferences: SharedPreferences = activity.getSharedPreferences("late", Context.MODE_PRIVATE)
+        val calendarId = sharedPreferences.getString("calendarId", null)
+        val calendarSummary = sharedPreferences.getString("calendarSummary", "None")
+
+        selectedCalendar = CalendarListEntry().setSummary(calendarSummary)
+
+        // Choose saved one. Otherwise, choose the primary one
+        if (calendarId != null) {
+            selectedCalendar = selectedCalendar.setId(calendarId)
+        }
+        else {
+            selectedCalendar = calendarListEntries.first { it.primary }
+        }
     }
 
     LaunchedEffect(selectedCalendar) {
@@ -394,6 +409,7 @@ fun CalendarView(modifier: Modifier = Modifier) {
         val sharedPreferences: SharedPreferences = activity.getSharedPreferences("late", Context.MODE_PRIVATE)
         val editor: SharedPreferences.Editor = sharedPreferences.edit()
         editor.putString("calendarId", selectedCalendar.id)
+        editor.putString("calendarSummary", selectedCalendar.summary)
         editor.apply()
 
         nextEvent = null
